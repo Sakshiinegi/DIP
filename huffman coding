@@ -1,0 +1,78 @@
+import heapq
+
+class Node:
+    def __init__(self, char, freq):
+        self.char = char
+        self.freq = freq
+        self.left = None
+        self.right = None
+
+
+def huffman_coding(text):
+    frequency = {}
+
+    # Calculate frequency
+    for char in text:
+        frequency[char] = frequency.get(char, 0) + 1
+
+    heap = []
+    counter = 0
+
+    # Create min heap
+    for char, freq in frequency.items():
+        node = Node(char, freq)
+        heapq.heappush(heap, (freq, counter, node))
+        counter += 1
+
+    # Build Huffman tree
+    while len(heap) > 1:
+        freq1, _, node1 = heapq.heappop(heap)
+        freq2, _, node2 = heapq.heappop(heap)
+
+        new_node = Node(None, freq1 + freq2)
+        new_node.left = node1
+        new_node.right = node2
+
+        heapq.heappush(heap, (new_node.freq, counter, new_node))
+        counter += 1
+
+    if not heap:
+        return {}, ""
+
+    root = heap[0][2]
+    codes = {}
+
+    # Generate Huffman codes
+    def generate_codes(node, code=""):
+        if node is None:
+            return
+
+        if node.char is not None:
+            codes[node.char] = code if code else "0"
+            return
+
+        generate_codes(node.left, code + "0")
+        generate_codes(node.right, code + "1")
+
+    generate_codes(root)
+
+    # Encode text
+    encoded_text = ''.join(codes[char] for char in text)
+
+    return codes, encoded_text
+
+
+# Input text
+text = "HELLO WORLD"
+
+# Run Huffman coding
+codes, encoded_text = huffman_coding(text)
+
+# Display results
+print("Original Text:", text)
+print("\nCharacter Frequencies and Huffman Codes:")
+
+for char, code in codes.items():
+    print(repr(char), ":", code)
+
+print("\nEncoded Text:", encoded_text)
