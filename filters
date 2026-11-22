@@ -1,0 +1,162 @@
+import sys
+
+print(sys.executable) 
+%pip install -q matplotlib numpy opencv-python
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+
+print("All imports succeeded!")
+%matplotlib inline
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Load a grayscale image (falls back to a synthetic pattern if 'sample.jpg' isn't found)
+img = cv2.imread("sample.jpeg", cv2.IMREAD_GRAYSCALE)
+
+if img is None:
+  h, w = 256, 256
+  y, x = np.mgrid[0:h, 0:w]
+  img = np.zeros((h, w), dtype=np.uint8)
+  img[40:120, 40:140] = 200
+  cv2.circle(img, (180, 170), 45, 140, -1)
+  cv2.line(img, (20, 220), (235, 30), 255, 3)
+  # Add mild salt-and-pepper and Gaussian noise so denoising filters are easy to inspect
+  rng = np.random.default_rng(42)
+  noisy = img.astype(np.float32) + rng.normal(0, 12, img.shape)
+  salt_pepper = rng.random(img.shape)
+  noisy[salt_pepper < 0.01] = 255
+  noisy[salt_pepper > 0.99] = 0
+  img = np.clip(noisy, 0, 255).astype(np.uint8)
+
+plt.figure(figsize=(4, 4))
+plt.imshow(img, cmap="gray")
+plt.title("Input Image")
+plt.axis("off")
+plt.show() 
+# 1. Mean / Averaging Filter (uniform kernel)
+mean_filter = cv2.blur(img, (5, 5))
+
+# 2. Weighted Averaging Filter (center-weighted kernel)
+weighted_kernel = np.array(
+    [[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=np.float32
+)
+weighted_kernel /= weighted_kernel.sum()
+weighted_avg = cv2.filter2D(img, -1, weighted_kernel)
+
+# 3. Gaussian Filter
+gaussian_filter = cv2.GaussianBlur(img, (5, 5), sigmaX=1.5)
+
+# 4. Median Filter (great for salt-and-pepper noise)
+median_filter = cv2.medianBlur(img, 5)
+
+spatial_smooth = [
+    ("Original", img),
+    ("Mean (5x5)", mean_filter),
+    ("Weighted Avg (3x3)", weighted_avg),
+    ("Gaussian (5x5, σ=1.5)", gaussian_filter),
+    ("Median (5x5)", median_filter),
+]
+
+fig, axes = plt.subplots(1, 5, figsize=(18, 4))
+for ax, (title, im) in zip(axes, spatial_smooth):
+  ax.imshow(im, cmap="gray", vmin=0, vmax=255)
+  ax.set_title(title)
+  ax.axis("off")
+plt.tight_layout()
+plt.show() 
+img_f = img.astype(np.float32)
+
+# 5. Laplacian Filter (second-order isotropic derivative)
+lap_raw = cv2.Laplacian(img_f, cv2.CV_32F, ksize=3)
+laplacian_vis = np.clip(np.abs(lap_raw), 0, 255).astype(np.uint8)
+
+# 6. Sobel Filter (first-order gradient magnitude in X and Y)
+sobel_x = cv2.Sobel(img_f, cv2.CV_32F, 1, 0, ksize=3)
+sobel_y = cv2.Sobel(img_f, cv2.CV_32F, 0, 1, ksize=3)
+sobel_mag = np.clip(np.hypot(sobel_x, sobel_y), 0, 255).astype(np.uint8)
+
+# 7. High-Boost Filter: f_hb = A * f(x,y) - f_smooth(x,y)  (equivalently f + (A-1)*(f - f_smooth))
+A = 1.8  # Boost factor (A = 1 -> original, A > 1 -> high-boost sharpening)
+blurred_for_hb = cv2.GaussianBlur(img_f, (5, 5), sigmaX=1.5)
+high_boost = np.clip(A * img_f - blurred_for_hb, 0, 255).astype(np.uint8)
+
+edge_sharp = [
+    ("Original", img),
+    ("Laplacian |∇²f|", laplacian_vis),
+    ("Sobel Magnitude", sobel_mag),
+    (f"High-Boost (A={A})", high_boost),
+]
+
+fig, axes = plt.subplots(1, 4, figsize=(15, 4))
+for ax, (title, im) in zip(axes, edge_sharp):
+  ax.imshow(im, cmap="gray", vmin=0, vmax=255)
+  ax.set_title(title)
+  ax.axis("off")
+plt.tight_layout()
+plt.show() 
+def distance_grid(shape):
+  rows, cols = shape
+  u = np.arange(rows) - rows / 2.0
+  v = np.arange(cols) - cols / 2.0
+  V, U = np.meshgrid(v, u)
+  return np.sqrt(U**2 + V**2)
+
+
+def apply_freq_filter(image, H):
+  f_shift = np.fft.fftshift(np.fft.fft2(image.astype(np.float32)))
+  filtered_shift = f_shift * H
+  img_back = np.fft.ifft2(np.fft.ifftshift(filtered_shift))
+  return np.clip(np.abs(img_back), 0, 255).astype(np.uint8)
+
+
+D = distance_grid(img.shape)
+D0 = 30.0  # Cutoff frequency
+n = 2  # Butterworth order
+
+# Low-Pass Transfer Functions H_LP(u, v)
+H_ilpf = (D <= D0).astype(np.float32)
+H_blpf = 1.0 / (1.0 + (D / D0) ** (2 * n))
+H_glpf = np.exp(-(D**2) / (2 * (D0**2)))
+
+# High-Pass Transfer Functions H_HP(u, v) = 1 - H_LP(u, v)
+H_ihpf = 1.0 - H_ilpf
+H_bhpf = 1.0 - H_blpf
+H_ghpf = 1.0 - H_glpf
+
+# Apply Low-Pass Filters (8, 9, 10)
+ilpf_img = apply_freq_filter(img, H_ilpf)
+blpf_img = apply_freq_filter(img, H_blpf)
+glpf_img = apply_freq_filter(img, H_glpf)
+
+# Apply High-Pass Versions (11)
+ihpf_img = apply_freq_filter(img, H_ihpf)
+bhpf_img = apply_freq_filter(img, H_bhpf)
+ghpf_img = apply_freq_filter(img, H_ghpf)
+
+fig, axes = plt.subplots(2, 3, figsize=(14, 9))
+lp_results = [
+    (f"Ideal LPF (D0={D0})", ilpf_img),
+    (f"Butterworth LPF (D0={D0}, n={n})", blpf_img),
+    (f"Gaussian LPF (D0={D0})", glpf_img),
+]
+hp_results = [
+    (f"Ideal HPF (D0={D0})", ihpf_img),
+    (f"Butterworth HPF (D0={D0}, n={n})", bhpf_img),
+    (f"Gaussian HPF (D0={D0})", ghpf_img),
+]
+
+for ax, (title, im) in zip(axes[0], lp_results):
+  ax.imshow(im, cmap="gray", vmin=0, vmax=255)
+  ax.set_title(title)
+  ax.axis("off")
+
+for ax, (title, im) in zip(axes[1], hp_results):
+  ax.imshow(im, cmap="gray", vmin=0, vmax=255)
+  ax.set_title(title)
+  ax.axis("off")
+
+plt.tight_layout()
+plt.show() 
