@@ -1,0 +1,60 @@
+from collections import Counter
+
+# Input text
+text = "ABABAC"
+
+# Step 1: Calculate frequency
+frequency = Counter(text)
+total = len(text)
+
+# Step 2: Calculate probability and cumulative ranges
+probability = {}
+cumulative = {}
+
+low = 0.0
+
+for char, freq in frequency.items():
+    probability[char] = freq / total
+    high = low + probability[char]
+    cumulative[char] = (low, high)
+    low = high
+
+# Step 3: Arithmetic Encoding
+low = 0.0
+high = 1.0
+
+for char in text:
+    range_width = high - low
+    char_low, char_high = cumulative[char]
+
+    high = low + range_width * char_high
+    low = low + range_width * char_low
+
+encoded_value = (low + high) / 2
+
+print("Original Text:", text)
+print("\nCharacter Probabilities:")
+for char in probability:
+    print(char, ":", probability[char])
+
+print("\nEncoded Value:", encoded_value)
+
+
+# Step 4: Arithmetic Decoding
+decoded_text = ""
+low = 0.0
+high = 1.0
+
+for _ in range(len(text)):
+    value = (encoded_value - low) / (high - low)
+
+    for char, (char_low, char_high) in cumulative.items():
+        if char_low <= value < char_high:
+            decoded_text += char
+
+            range_width = high - low
+            high = low + range_width * char_high
+            low = low + range_width * char_low
+            break
+
+print("\nDecoded Text:", decoded_text)
